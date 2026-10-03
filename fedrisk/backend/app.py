@@ -1,0 +1,255 @@
+"""
+FedRisk FastAPI Server.
+Provides endpoints for federated orchestration, real-time telemetry, and ICU readmission risk prediction.
+"""
+
+import json
+import threading
+from pathlib import Path
+from typing import Any, Dict, List
+import psutil
+import torch
+from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+
+from ..config import (
+    CHECKPOINT_DIR,
+    CLIENT_GPU_FRACTION,
+    HOSPITAL_METADATA,
+    LOGS_DIR,
+    NUM_FEDERATED_ROUNDS,
+    PARTITIONS_DIR,
+    SECURE_AGGREGATION_ENABLED,
+)
+from ..data.fhir_parser import FHIRParser
+from ..data.graph_builder import PatientGraphBuilder
+from ..data.partitioner import HospitalDataPartitioner
+from ..federated.simulation import run_federated_simulation
+from ..models.gnn import TemporalPatientRiskGNN
+from .schemas import (
+    ClinicalEventItem,
+    HospitalNodeTelemetry,
+    PatientInferenceRequest,
+    PatientRiskResponse,
+    RoundMetricItem,
+    SystemHealthResponse,
+    TrainingHistoryResponse,
+    TrainingStatusResponse,
+    TrainingTriggerRequest,
+)
+from .state import training_state
+
+# Initialize FastAPI App
+app = FastAPI(
+    title="FedRisk ICU Readmission Platform",
+    description="Privacy-Preserving ICU Readmission Risk Platform using PyG, Flower SMPC, and RTX 5060 Multiplexing.",
+    version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Shared Singletons
+fhir_parser = FHIRParser()
+graph_builder = PatientGraphBuilder()
+
+
+def _async_training_worker(rounds: int, epochs: int, lr: float, use_smpc: bool):
+    """Background worker thread executing Flower Simulation."""
+    try:
+        def on_round_complete(round_data: Dict[str, Any]):
+            training_state.update_round(round_data)
+
+        result = run_federated_simulation(
+            num_rounds=rounds,
+            state_callback=on_round_complete,
+            use_gpu=True,
+        )
+        training_state.finish_training(result)
+    except Exception as e:
+        training_state.fail_training(str(e))
+        print(f"[Backend Worker Error] {e}")
+
+
+@app.get("/", tags=["General"])
+def root():
+    return {
+        "platform": "FedRisk",
+        "description": "Privacy-Preserving ICU Readmission Risk Prediction Platform",
+        "version": "1.0.0",
+        "docs_url": "/docs",
+    }
+
+
+@app.post("/api/orchestration/start", response_model=Dict[str, str], tags=["Federated Orchestration"])
+def start_orchestration(req: TrainingTriggerRequest):
+    """Triggers federated learning simulation across 3 hospital nodes."""
+    success = training_state.start_training(total_rounds=req.num_rounds)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Federated training simulation is already actively running.",
+        )
+
+    worker = threading.Thread(
+        target=_async_training_worker,
+        args=(req.num_rounds, req.local_epochs, req.learning_rate, req.use_smpc),
+        daemon=True,
+    )
+    training_state.worker_thread = worker
+    worker.start()
+
+    return {
+        "message": f"Federated simulation started successfully for {req.num_rounds} rounds.",
+        "status": "running",
+    }
+
+
+@app.get("/api/orchestration/status", response_model=TrainingStatusResponse, tags=["Federated Orchestration"])
+def get_orchestration_status():
+    """Returns real-time progress, loss, and AUROC of the active simulation."""
+    return training_state.get_status()
+
+
+@app.get("/api/orchestration/history", response_model=TrainingHistoryResponse, tags=["Federated Orchestration"])
+def get_orchestration_history():
+    """Retrieves full round-by-round convergence logs."""
+    history = training_state.get_history()
+    return {
+        "total_rounds_logged": len(history),
+        "history": history,
+    }
+
+
+@app.post("/api/predict/patient", response_model=PatientRiskResponse, tags=["Clinical Risk Inference"])
+def predict_patient_risk(req: PatientInferenceRequest):
+    """
+    Evaluates ICU readmission risk for a clinical trajectory using the global GNN.
+    Accepts either an explicit FHIR JSON Bundle or a patient ID from disk.
+    """
+    trajectory = None
+
+    # Option A: Parse user-provided FHIR JSON Bundle
+    if req.fhir_bundle:
+        trajectory = fhir_parser.parse_bundle(req.fhir_bundle, hospital_site_id=req.site_id or 0)
+
+    # Option B: Load from stored hospital partition
+    elif req.patient_id:
+        # Search partition raw FHIR directory
+        site_id = req.site_id or 0
+        site_raw_dir = PARTITIONS_DIR / f"site_{site_id}" / "raw_fhir"
+        matched_file = None
+        if site_raw_dir.exists():
+            for f in site_raw_dir.glob("*.json"):
+                if req.patient_id in f.stem or req.patient_id in f.name:
+                    matched_file = f
+                    break
+        if matched_file:
+            trajectory = fhir_parser.parse_bundle_file(matched_file, hospital_site_id=site_id)
+
+    # Fallback: Generate demo patient trajectory
+    if not trajectory:
+        from ..data.dataset_generator import FHIRDatasetGenerator
+        gen = FHIRDatasetGenerator()
+        bundle = gen.generate_patient_bundle(999, req.site_id or 0, 0.5)
+        trajectory = fhir_parser.parse_bundle(bundle, hospital_site_id=req.site_id or 0)
+
+    # Construct PyG Graph
+    patient_graph = graph_builder.trajectory_to_graph(trajectory)
+
+    # Load Global Model Checkpoint
+    model = TemporalPatientRiskGNN()
+    best_ckpt = CHECKPOINT_DIR / "best_global_model.pt"
+    latest_ckpt = CHECKPOINT_DIR / "latest_global_model.pt"
+
+    model_version = "Untrained Baseline"
+    if best_ckpt.exists():
+        model.load_state_dict(torch.load(best_ckpt, weights_only=False))
+        model_version = "Best Global Checkpoint (AUROC Optimized)"
+    elif latest_ckpt.exists():
+        model.load_state_dict(torch.load(latest_ckpt, weights_only=False))
+        model_version = "Latest Federated Round Checkpoint"
+
+    model.eval()
+    risk_info = model.predict_risk(patient_graph)
+
+    # Format clinical events
+    event_items = [
+        ClinicalEventItem(
+            event_id=ev.event_id,
+            code=ev.code,
+            display=ev.display,
+            relative_time_hours=ev.relative_time_hours,
+            severity=ev.severity,
+        )
+        for ev in trajectory.events
+    ]
+
+    return PatientRiskResponse(
+        patient_id=trajectory.patient_id,
+        readmission_risk_score=risk_info["readmission_risk_score"],
+        risk_percentage=risk_info["risk_percentage"],
+        category=risk_info["category"],
+        clinical_recommendation=risk_info["clinical_recommendation"],
+        event_count=len(event_items),
+        events=event_items,
+        model_version=model_version,
+    )
+
+
+@app.get("/api/nodes/telemetry", response_model=List[HospitalNodeTelemetry], tags=["Telemetry & Telematics"])
+def get_nodes_telemetry():
+    """Returns telemetry and clinical profiles across the 3 hospital partitions."""
+    latest_metrics = training_state.latest_metrics.get("site_metrics", [])
+    metric_map = {m["site_id"]: m for m in latest_metrics if "site_id" in m}
+
+    nodes = []
+    for site_id, meta in HOSPITAL_METADATA.items():
+        site_m = metric_map.get(site_id, {})
+        nodes.append(
+            HospitalNodeTelemetry(
+                site_id=site_id,
+                name=meta["name"],
+                acuity_profile=meta["acuity_profile"],
+                patient_count=meta["patient_count"],
+                readmission_baseline=meta["readmission_baseline"],
+                latest_val_loss=site_m.get("val_loss"),
+                latest_val_auroc=site_m.get("val_auroc"),
+                vram_fraction_allocated=CLIENT_GPU_FRACTION,
+            )
+        )
+    return nodes
+
+
+@app.get("/api/system/health", response_model=SystemHealthResponse, tags=["Telemetry & Telematics"])
+def get_system_health():
+    """Hardware health monitor for 16GB Host RAM and RTX 5060 GPU."""
+    cuda_avail = torch.cuda.is_available()
+    gpu_name = torch.cuda.get_device_name(0) if cuda_avail else "CPU Only (Simulated)"
+
+    vram_total_mb = 0.0
+    vram_used_mb = 0.0
+    if cuda_avail:
+        vram_total_mb = round(torch.cuda.get_device_properties(0).total_memory / (1024**2), 1)
+        vram_used_mb = round(torch.cuda.memory_allocated(0) / (1024**2), 1)
+
+    mem = psutil.virtual_memory()
+    ram_total_gb = round(mem.total / (1024**3), 2)
+    ram_used_gb = round(mem.used / (1024**3), 2)
+
+    return SystemHealthResponse(
+        status="operational",
+        torch_version=torch.__version__,
+        cuda_available=cuda_avail,
+        gpu_name=gpu_name,
+        vram_total_mb=vram_total_mb,
+        vram_used_mb=vram_used_mb,
+        ram_total_gb=ram_total_gb,
+        ram_used_gb=ram_used_gb,
+        active_clients=3,
+    )

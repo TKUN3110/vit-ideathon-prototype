@@ -1,0 +1,26 @@
+# Virtual Environment
+.venv/
+env/
+venv/
+
+# Python cache & compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+
+# Model Checkpoints, Logs, and Generated Mock Data
+checkpoints/
+logs/
+data/partitions/
+*.pt
+
+# Compiled Binaries
+*.exe
+
+# IDE & System Files
+.vscode/
+.DS_Store
+Thumbs.db
