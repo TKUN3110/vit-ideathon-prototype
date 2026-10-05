@@ -81,16 +81,13 @@ class HospitalNodeTelemetry(BaseModel):
     readmission_baseline: float
     latest_val_loss: Optional[float] = None
     latest_val_auroc: Optional[float] = None
-    vram_fraction_allocated: float
+    resource_fraction_allocated: float
 
 
 class SystemHealthResponse(BaseModel):
     status: str
-    torch_version: str
     cuda_available: bool
-    gpu_name: str
-    vram_total_mb: float
-    vram_used_mb: float
     ram_total_gb: float
     ram_used_gb: float
     active_clients: int
+

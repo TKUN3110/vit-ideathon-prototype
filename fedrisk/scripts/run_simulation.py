@@ -1,13 +1,21 @@
 """
 Standalone CLI script to execute FedRisk Flower Simulation.
-Multiplexes RTX 5060 across 3 simulated hospital nodes with SMPC Secure Aggregation.
+Multiplexes client workloads across simulated hospital nodes with SMPC Secure Aggregation.
+Auto-detects project virtual environment (.venv) if available.
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+# Auto-detect and re-execute using project virtual environment (.venv)
+venv_python = BASE_DIR / ".venv" / "Scripts" / "python.exe" if sys.platform == "win32" else BASE_DIR / ".venv" / "bin" / "python"
+if venv_python.exists() and Path(sys.executable).resolve() != venv_python.resolve():
+    os.execv(str(venv_python), [str(venv_python)] + sys.argv)
+
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
@@ -26,13 +34,13 @@ def main():
     parser.add_argument(
         "--no-gpu",
         action="store_true",
-        help="Force CPU execution (disable RTX 5060)",
+        help="Force CPU execution (disable GPU acceleration)",
     )
     args = parser.parse_args()
 
     print("=" * 75)
     print("[FedRisk] Privacy-Preserving Federated Simulation")
-    print(f"Rounds: {args.rounds} | Nodes: 3 | SMPC: Enabled | Device: {'CPU' if args.no_gpu else 'RTX 5060 (0.33/node)'}")
+    print(f"Rounds: {args.rounds} | Nodes: 3 | SMPC: Enabled | Device: {'CPU' if args.no_gpu else 'GPU Accelerated'}")
     print("=" * 75)
 
     result = run_federated_simulation(
@@ -43,8 +51,6 @@ def main():
     print("\n" + "=" * 75)
     print(f"Simulation Finished! Status: {result.get('status')}")
     print(f"Best Validation AUROC Achieved: {result.get('best_auroc', 0.0):.4f}")
-    print(f"SMPC Zero-Sum Mask Verifications: {len(result.get('smpc_audits', []))} rounds verified.")
-    print("Checkpoints saved to ./checkpoints/")
     print("=" * 75)
 
 

@@ -220,7 +220,7 @@ def get_nodes_telemetry():
                 readmission_baseline=meta["readmission_baseline"],
                 latest_val_loss=site_m.get("val_loss"),
                 latest_val_auroc=site_m.get("val_auroc"),
-                vram_fraction_allocated=CLIENT_GPU_FRACTION,
+                resource_fraction_allocated=CLIENT_GPU_FRACTION,
             )
         )
     return nodes
@@ -228,28 +228,160 @@ def get_nodes_telemetry():
 
 @app.get("/api/system/health", response_model=SystemHealthResponse, tags=["Telemetry & Telematics"])
 def get_system_health():
-    """Hardware health monitor for 16GB Host RAM and RTX 5060 GPU."""
+    """System health monitor."""
     cuda_avail = torch.cuda.is_available()
-    gpu_name = torch.cuda.get_device_name(0) if cuda_avail else "CPU Only (Simulated)"
-
-    vram_total_mb = 0.0
-    vram_used_mb = 0.0
-    if cuda_avail:
-        vram_total_mb = round(torch.cuda.get_device_properties(0).total_memory / (1024**2), 1)
-        vram_used_mb = round(torch.cuda.memory_allocated(0) / (1024**2), 1)
-
     mem = psutil.virtual_memory()
     ram_total_gb = round(mem.total / (1024**3), 2)
     ram_used_gb = round(mem.used / (1024**3), 2)
 
     return SystemHealthResponse(
         status="operational",
-        torch_version=torch.__version__,
         cuda_available=cuda_avail,
-        gpu_name=gpu_name,
-        vram_total_mb=vram_total_mb,
-        vram_used_mb=vram_used_mb,
         ram_total_gb=ram_total_gb,
         ram_used_gb=ram_used_gb,
         active_clients=3,
     )
+
+
+
+@app.get("/api/patients/list", tags=["Clinical Risk Inference"])
+def list_patients(site_id: int = 0):
+    """Lists available patient records for a specific hospital partition."""
+    site_raw_dir = PARTITIONS_DIR / f"site_{site_id}" / "raw_fhir"
+    if not site_raw_dir.exists():
+        # Generate mock dataset if missing
+        from ..data.dataset_generator import FHIRDatasetGenerator
+        FHIRDatasetGenerator().generate_partitioned_dataset()
+
+    patient_files = sorted(list(site_raw_dir.glob("*.json"))) if site_raw_dir.exists() else []
+    results = []
+    
+    for p_file in patient_files:
+        try:
+            with open(p_file, "r", encoding="utf-8") as f:
+                bundle = json.load(f)
+            traj = fhir_parser.parse_bundle(bundle, hospital_site_id=site_id)
+            primary_diag = traj.events[0].display if traj.events else "Unspecified ICU Admission"
+            results.append({
+                "patient_id": traj.patient_id,
+                "gender": traj.gender,
+                "length_of_stay_hours": traj.length_of_stay_hours,
+                "event_count": len(traj.events),
+                "readmitted_30d": traj.readmitted_30d,
+                "primary_diagnosis": primary_diag,
+                "site_id": site_id,
+                "file_name": p_file.name
+            })
+        except Exception as e:
+            continue
+
+    return {
+        "site_id": site_id,
+        "site_name": HOSPITAL_METADATA.get(site_id, {}).get("name", f"Site-{site_id}"),
+        "count": len(results),
+        "patients": results
+    }
+
+
+@app.get("/api/patients/graph/{patient_id}", tags=["Clinical Risk Inference"])
+def get_patient_graph_topology(patient_id: str, site_id: int = 0):
+    """Retrieves full patient clinical event DAG topology and risk prediction."""
+    site_raw_dir = PARTITIONS_DIR / f"site_{site_id}" / "raw_fhir"
+    matched_file = None
+
+    patient_num = patient_id.split("-")[-1] if "-" in patient_id else patient_id
+
+    if site_raw_dir.exists():
+        for f in site_raw_dir.glob("*.json"):
+            if patient_id in f.stem or patient_id in f.name or f.stem.endswith(patient_num) or f"patient_{patient_num}" in f.stem:
+                matched_file = f
+                break
+
+    if not matched_file:
+        # Fallback search across all site directories
+        for s in range(3):
+            s_dir = PARTITIONS_DIR / f"site_{s}" / "raw_fhir"
+            if s_dir.exists():
+                for f in s_dir.glob("*.json"):
+                    if patient_id in f.stem or patient_id in f.name or f.stem.endswith(patient_num) or f"patient_{patient_num}" in f.stem:
+                        matched_file = f
+                        site_id = s
+                        break
+            if matched_file:
+                break
+
+    if not matched_file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Patient ID {patient_id} not found in hospital partitions.",
+        )
+
+    with open(matched_file, "r", encoding="utf-8") as f:
+        bundle_data = json.load(f)
+
+    trajectory = fhir_parser.parse_bundle(bundle_data, hospital_site_id=site_id)
+    patient_graph = graph_builder.trajectory_to_graph(trajectory)
+
+    # Load Global GNN Checkpoint
+    model = TemporalPatientRiskGNN()
+    best_ckpt = CHECKPOINT_DIR / "best_global_model.pt"
+    latest_ckpt = CHECKPOINT_DIR / "latest_global_model.pt"
+
+    model_version = "Untrained Baseline"
+    if best_ckpt.exists():
+        model.load_state_dict(torch.load(best_ckpt, weights_only=False))
+        model_version = "Best Global Checkpoint (AUROC Optimized)"
+    elif latest_ckpt.exists():
+        model.load_state_dict(torch.load(latest_ckpt, weights_only=False))
+        model_version = "Latest Federated Round Checkpoint"
+
+    model.eval()
+    risk_info = model.predict_risk(patient_graph)
+
+    # Format DAG nodes & edges
+    nodes = []
+    for i, ev in enumerate(trajectory.events):
+        nodes.append({
+            "id": i,
+            "event_id": ev.event_id,
+            "code": ev.code,
+            "label": ev.display,
+            "relative_time_hours": ev.relative_time_hours,
+            "severity": ev.severity,
+            "encounter_id": ev.encounter_id,
+        })
+
+    edges = []
+    edge_index = patient_graph.edge_index.cpu().numpy()
+    for e in range(edge_index.shape[1]):
+        u, v = int(edge_index[0, e]), int(edge_index[1, e])
+        if u != v:  # Exclude self loops from network view
+            edges.append({"source": u, "target": v})
+
+    return {
+        "patient_id": trajectory.patient_id,
+        "site_id": site_id,
+        "site_name": HOSPITAL_METADATA.get(site_id, {}).get("name", f"Site-{site_id}"),
+        "gender": trajectory.gender,
+        "length_of_stay_hours": trajectory.length_of_stay_hours,
+        "readmitted_30d": trajectory.readmitted_30d,
+        "readmission_risk_score": risk_info["readmission_risk_score"],
+        "risk_percentage": risk_info["risk_percentage"],
+        "category": risk_info["category"],
+        "clinical_recommendation": risk_info["clinical_recommendation"],
+        "model_version": model_version,
+        "nodes": nodes,
+        "edges": edges,
+        "events": [
+            {
+                "event_id": ev.event_id,
+                "code": ev.code,
+                "display": ev.display,
+                "relative_time_hours": ev.relative_time_hours,
+                "severity": ev.severity,
+                "encounter_id": ev.encounter_id,
+            }
+            for ev in trajectory.events
+        ]
+    }
+

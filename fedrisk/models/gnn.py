@@ -1,7 +1,7 @@
 """
 Dynamic Patient Graph Neural Network (TemporalPatientRiskGNN).
 Processes dynamic clinical event topologies to output patient risk embeddings and ICU readmission probabilities.
-Optimized for mixed-precision (FP16) execution on NVIDIA RTX 5060.
+Optimized for mixed-precision (FP16) execution.
 """
 
 from typing import Dict, Optional, Tuple

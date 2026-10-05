@@ -14,8 +14,14 @@ __pycache__/
 # Model Checkpoints, Logs, and Generated Mock Data
 checkpoints/
 logs/
-data/partitions/
+data/
+output/
 *.pt
+
+# Node and UI Build artifacts
+node_modules/
+dist/
+synthea.jar
 
 # Compiled Binaries
 *.exe

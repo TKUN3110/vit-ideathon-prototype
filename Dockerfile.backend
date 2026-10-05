@@ -1,0 +1,31 @@
+# FedRisk Backend & Orchestration Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy python dependencies list
+COPY requirements.txt .
+
+# Install Python packages
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy platform source code
+COPY fedrisk/ ./fedrisk/
+COPY data/ ./data/
+
+# Set Python Path
+ENV PYTHONPATH=/app
+
+# Expose FastAPI server port
+EXPOSE 8000
+
+# Start backend server launcher
+CMD ["python", "fedrisk/scripts/run_backend.py"]

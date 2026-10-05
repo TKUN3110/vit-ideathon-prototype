@@ -1,12 +1,19 @@
 """
 Standalone CLI script to generate synthetic FHIR patient cohorts across 3 hospital partitions.
+Auto-detects project virtual environment (.venv) if available.
 """
 
+import os
 import sys
 from pathlib import Path
 
-# Add project root to sys.path
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+# Auto-detect and re-execute using project virtual environment (.venv)
+venv_python = BASE_DIR / ".venv" / "Scripts" / "python.exe" if sys.platform == "win32" else BASE_DIR / ".venv" / "bin" / "python"
+if venv_python.exists() and Path(sys.executable).resolve() != venv_python.resolve():
+    os.execv(str(venv_python), [str(venv_python)] + sys.argv)
+
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 

@@ -1,6 +1,6 @@
 """
 FedRisk Federated Learning Package.
-Features Flower Simulation multiplexing RTX 5060, SMPC Secure Aggregation, and Clinical Telemetry.
+Features Flower Simulation Engine, SMPC Secure Aggregation, and Clinical Telemetry.
 """
 
 from .client import FedRiskClient

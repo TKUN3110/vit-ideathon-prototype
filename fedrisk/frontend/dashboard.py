@@ -6,7 +6,12 @@ and individual patient clinical graph topologies with risk predictions.
 
 import json
 import time
+import sys
 from pathlib import Path
+
+# Ensure the root project directory is in sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
 from typing import Any, Dict, List
 import networkx as nx
 import numpy as np
@@ -50,14 +55,9 @@ def get_backend_health() -> Dict[str, Any]:
         pass
     # Local fallback
     cuda_avail = torch.cuda.is_available()
-    gpu_name = torch.cuda.get_device_name(0) if cuda_avail else "CPU Simulated"
     return {
         "status": "operational (direct)",
-        "torch_version": torch.__version__,
         "cuda_available": cuda_avail,
-        "gpu_name": gpu_name,
-        "vram_total_mb": 8151.0 if cuda_avail else 0.0,
-        "vram_used_mb": 1200.0 if cuda_avail else 0.0,
         "ram_total_gb": 16.0,
         "ram_used_gb": 7.4,
         "active_clients": 3,
@@ -458,39 +458,29 @@ with tabs[1]:
     st.dataframe(pd.DataFrame(timeline_records), use_container_width=True)
 
 # ==========================================
-# TAB 3: SMPC PRIVACY & RTX 5060 TELEMETRY
+# TAB 3: SMPC PRIVACY & COMPUTE TELEMETRY
 # ==========================================
 with tabs[2]:
-    st.subheader("Hardware Telemetry & Secure Multi-Party Computation (SMPC)")
+    st.subheader("Compute Telemetry & Secure Multi-Party Computation (SMPC)")
 
     tel_col1, tel_col2 = st.columns(2)
 
     with tel_col1:
-        st.markdown("### 🎮 NVIDIA RTX 5060 GPU Allocation")
+        st.markdown("### 🎮 Client Resource Allocation")
         st.markdown(
             """
-            Flower Simulation Engine partitions the single RTX 5060 across the 3 hospital nodes
-            without exceeding GPU memory thresholds:
+            Flower Simulation Engine partitions compute resources across the 3 hospital nodes:
             """
         )
 
         vram_df = pd.DataFrame(
             [
-                {"Hospital Node": "Site-A (Metro Trauma)", "VRAM Allocated (MB)": 1800, "GPU Share": "33%"},
-                {"Hospital Node": "Site-B (Heart & Vascular)", "VRAM Allocated (MB)": 1800, "GPU Share": "33%"},
-                {"Hospital Node": "Site-C (Community Hospital)", "VRAM Allocated (MB)": 1800, "GPU Share": "33%"},
-                {"Hospital Node": "OS & Display Buffer", "VRAM Allocated (MB)": 1600, "GPU Share": "System"},
+                {"Hospital Node": "Site-A (Metro Trauma)", "Allocation Share": "33%"},
+                {"Hospital Node": "Site-B (Heart & Vascular)", "Allocation Share": "33%"},
+                {"Hospital Node": "Site-C (Community Hospital)", "Allocation Share": "33%"},
             ]
         )
-        fig_vram = px.pie(
-            vram_df,
-            names="Hospital Node",
-            values="VRAM Allocated (MB)",
-            title="<b>RTX 5060 8GB VRAM Multiplexing Partition</b>",
-            color_discrete_sequence=px.colors.sequential.Teal,
-        )
-        fig_vram.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20))
-        st.plotly_chart(fig_vram, use_container_width=True)
+        st.dataframe(vram_df, use_container_width=True)
 
     with tel_col2:
         st.markdown("### 🔐 SMPC Zero-Knowledge Mathematical Verification")

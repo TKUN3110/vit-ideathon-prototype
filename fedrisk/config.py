@@ -1,6 +1,6 @@
 """
 FedRisk - Central Configuration Module
-Hardware-aware settings tailored for NVIDIA RTX 5060 (8GB VRAM) and 16GB Host RAM.
+Hardware-aware settings for cross-platform federated clinical GNN training.
 """
 
 import os
@@ -19,14 +19,12 @@ for directory in [DATA_DIR, PARTITIONS_DIR, CHECKPOINT_DIR, LOGS_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
 # Hardware & Device Settings
-# Optimized for RTX 5060 (8GB VRAM) and 16GB System RAM
-# Prevents GPU/RAM OOM by allocating 0.33 GPU per client in Flower Simulation
-USE_CUDA = True  # Will fallback gracefully if CUDA is not available
+USE_CUDA = True  # Will fallback gracefully to CPU if hardware acceleration is unavailable
 TARGET_GPU_DEVICE = 0
 NUM_CLIENTS = 3
-CLIENT_GPU_FRACTION = 0.33  # Multiplex single RTX 5060 across 3 simulated hospital nodes
+CLIENT_GPU_FRACTION = 0.33  # Multiplexes GPU resource share across simulated hospital nodes
 CLIENT_CPU_COUNT = 1
-USE_AMP = True  # Automatic Mixed Precision (FP16) to conserve VRAM
+USE_AMP = True  # Automatic Mixed Precision (FP16)
 
 # GNN Architecture Hyperparameters
 NODE_FEATURE_DIM = 32
@@ -72,6 +70,6 @@ HOSPITAL_METADATA = {
 }
 
 # Network & Server Endpoints
-BACKEND_HOST = "127.0.0.1"
-BACKEND_PORT = 8000
-FRONTEND_PORT = 8501
+BACKEND_HOST = os.getenv("BACKEND_HOST", "0.0.0.0")
+BACKEND_PORT = int(os.getenv("BACKEND_PORT", 8000))
+FRONTEND_PORT = int(os.getenv("FRONTEND_PORT", 8501))

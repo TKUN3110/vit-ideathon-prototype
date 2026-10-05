@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+import pyhealth.medcode
 
 
 @dataclass
@@ -74,6 +75,7 @@ class FHIRParser:
         patient_resource = None
         encounters: List[Dict[str, Any]] = []
         conditions: List[Dict[str, Any]] = []
+        med_requests: List[Dict[str, Any]] = []
 
         entries = bundle_dict.get("entry", [])
         for entry in entries:
@@ -85,6 +87,8 @@ class FHIRParser:
                 encounters.append(resource)
             elif rtype == "Condition":
                 conditions.append(resource)
+            elif rtype == "MedicationRequest":
+                med_requests.append(resource)
 
         if not patient_resource:
             return None
@@ -147,6 +151,15 @@ class FHIRParser:
             code = primary_coding.get("code", "R69")  # R69 = Illness, unspecified
             display = primary_coding.get("display", cond.get("code", {}).get("text", "Medical Event"))
             
+            # Healthcare Data Abstraction: Map ICD10 code to description if missing, using PyHealth
+            if display == "Medical Event" or not display:
+                try:
+                    icd10 = pyhealth.medcode.InnerMap.load("ICD10CM")
+                    if code in icd10:
+                        display = icd10.lookup(code)
+                except Exception:
+                    pass
+            
             category = "diagnosis"
             cat_list = cond.get("category", [])
             if cat_list and "coding" in cat_list[0]:
@@ -173,6 +186,36 @@ class FHIRParser:
                 severity=severity,
                 encounter_id=enc_ref,
                 attributes={"status": cond.get("clinicalStatus", {}).get("coding", [{}])[0].get("code", "active")},
+            )
+            events.append(event)
+
+        # Parse MedicationRequest events
+        for med in med_requests:
+            med_id = med.get("id", f"med_{len(events)}")
+            coding_list = med.get("medicationCodeableConcept", {}).get("coding", [{}])
+            primary_coding = coding_list[0] if coding_list else {}
+            code = primary_coding.get("code", "MED-ICU")
+            display = primary_coding.get("display", med.get("medicationCodeableConcept", {}).get("text", "Medication Administered"))
+
+            authored_str = med.get("authoredOn") or start_time_str
+            authored_dt = self._parse_datetime(authored_str)
+
+            rel_hours = (authored_dt - admission_time).total_seconds() / 3600.0
+            if rel_hours < 0:
+                rel_hours = 0.0
+
+            enc_ref = med.get("encounter", {}).get("reference", index_encounter.get("id", ""))
+
+            event = ClinicalEvent(
+                event_id=med_id,
+                code=code,
+                display=display,
+                category="medication",
+                onset_datetime=authored_dt,
+                relative_time_hours=rel_hours,
+                severity="moderate",
+                encounter_id=enc_ref,
+                attributes={"status": med.get("status", "active")},
             )
             events.append(event)
 

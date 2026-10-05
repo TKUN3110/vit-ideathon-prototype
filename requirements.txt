@@ -1,19 +1,17 @@
 # FedRisk Platform Dependencies
-# Hardware Target: 16GB RAM, NVIDIA RTX 5060 (8GB VRAM)
-# PyTorch CUDA 12.8: Install via --index-url https://download.pytorch.org/whl/cu128
 torch>=2.4.0
 torch-geometric>=2.5.0
 flwr[simulation]>=1.11.0
 pyhealth>=1.1.4
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
-streamlit>=1.38.0
 plotly>=5.24.0
 networkx>=3.3
 scikit-learn>=1.5.0
 pydantic>=2.8.0
 requests>=2.32.0
-pandas>=2.2.0
-numpy>=1.26.0,<3.0.0
+pandas>=1.5.0,<2.0.0
+numpy>=1.26.0,<2.0.0
 matplotlib>=3.9.0
 psutil>=6.0.0
+streamlit>=1.38.0

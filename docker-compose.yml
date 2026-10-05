@@ -1,0 +1,88 @@
+services:
+  # FedRisk FastAPI Backend Server
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: fedrisk_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+      - ./logs:/app/logs
+    restart: always
+
+  # FedRisk Server (Aggregator)
+  aggregator:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: fedrisk_aggregator
+    command: ["python", "-m", "fedrisk.scripts.run_server"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+      - ./logs:/app/logs
+    restart: always
+
+  # FedRisk Client 0 (Site A)
+  client-0:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: fedrisk_client_0
+    command: ["python", "-m", "fedrisk.scripts.run_client", "--site_id", "0", "--server", "aggregator:8080"]
+    depends_on:
+      - aggregator
+    volumes:
+      - ./data:/app/data
+    restart: always
+
+  # FedRisk Client 1 (Site B)
+  client-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: fedrisk_client_1
+    command: ["python", "-m", "fedrisk.scripts.run_client", "--site_id", "1", "--server", "aggregator:8080"]
+    depends_on:
+      - aggregator
+    volumes:
+      - ./data:/app/data
+    restart: always
+
+  # FedRisk Client 2 (Site C)
+  client-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: fedrisk_client_2
+    command: ["python", "-m", "fedrisk.scripts.run_client", "--site_id", "2", "--server", "aggregator:8080"]
+    depends_on:
+      - aggregator
+    volumes:
+      - ./data:/app/data
+    restart: always
+
+  # FedRisk Streamlit Frontend
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: fedrisk_frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_HOST=backend
+    depends_on:
+      - backend
+    volumes:
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+      - ./logs:/app/logs
+    restart: always
