@@ -1,20 +1,20 @@
 # FedRisk: Privacy-Preserving ICU Readmission Prediction Platform
 
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C.svg?logo=pytorch)](https://pytorch.org/)
-[![Flower](https://img.shields.io/badge/Flower-flwr[simulation]-FF9800.svg)](https://flower.ai/)
+[![Flower](https://img.shields.io/badge/Flower-flwr-FF9800.svg)](https://flower.ai/)
 [![PyG](https://img.shields.io/badge/PyG-PyTorch%20Geometric-3C2179.svg)](https://pyg.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com/)
-[![React](https://img.shields.io/badge/React-18.2+-61DAFB.svg?logo=react)](https://react.dev/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.38+-FF4B4B.svg?logo=streamlit)](https://streamlit.io/)
 
-FedRisk is an enterprise-grade, privacy-preserving ICU readmission prediction platform engineered for high-acuity intensive care environments. It leverages **PyTorch Geometric (PyG)** to model patient trajectories as dynamic temporal event graphs, **Flower (flwr[simulation])** to execute federated training across 3 simulated hospital nodes with GPU hardware acceleration, **SMPC (Secure Multi-Party Computation / Secure Aggregation)** to prevent clinical weight leakage, a **FastAPI** backend for lifecycle orchestration, and a modern **React** clinical intelligence dashboard.
+FedRisk is an enterprise-grade, privacy-preserving ICU readmission prediction platform engineered for high-acuity intensive care environments. It leverages **PyTorch Geometric (PyG)** to model patient trajectories as dynamic temporal event graphs, **Flower (flwr)** to execute federated training across 3 simulated hospital nodes with GPU hardware acceleration, **SMPC (Secure Multi-Party Computation / Secure Aggregation)** to prevent clinical weight leakage, a **FastAPI** backend for lifecycle orchestration, and a modern **Streamlit** clinical intelligence dashboard.
 
 ---
 
 ## Environment & Architecture
 
 - **Cross-Platform Compute**: Supports CUDA GPU acceleration and standard CPU execution.
-- **Resource Multiplexing**: Flower's Simulation Engine partitions compute resources across simulated hospital nodes with client resource limits (`client_resources={"num_cpus": 1, "num_gpus": 0.33}`). Local training loops invoke Automatic Mixed Precision (`torch.amp.autocast('cuda')`) to optimize memory efficiency.
-- **Containerized & Native Deployment Options**: Supports containerized deployment via **Docker & Docker Compose** for isolated node execution as well as native local environment execution.
+- **True Multi-Node Isolation**: Employs a multi-container Docker architecture where each hospital node runs in total isolation. They communicate with the central aggregator securely over the network.
+- **Native Synthea Generation**: Employs the official Synthea Java engine to procedurally generate ABDM-compliant, highly realistic longitudinal EHR data.
 
 ---
 
@@ -23,39 +23,30 @@ FedRisk is an enterprise-grade, privacy-preserving ICU readmission prediction pl
 ```
 .
 ├── fedrisk/
-│   ├── __init__.py                 # FedRisk package root
 │   ├── config.py                   # Central configuration module
 │   ├── data/
-│   │   ├── __init__.py
-│   │   ├── fhir_parser.py          # FHIR R4 JSON parser (Patient, Condition, Encounter)
+│   │   ├── fhir_parser.py          # FHIR R4 JSON parser (Patient, Condition, Encounter) + PyHealth
 │   │   ├── graph_builder.py        # Converts EHR trajectories into PyG temporal event DAGs
-│   │   ├── dataset_generator.py    # Generates realistic synthetic ICU cohorts across 3 sites
-│   │   └── partitioner.py          # PyG DataLoader factory & non-IID train/val splitter
+│   │   └── dataset_generator.py    # Generates realistic synthetic ICU cohorts via Synthea Java Engine
 │   ├── models/
-│   │   ├── __init__.py
 │   │   ├── gnn.py                  # TemporalPatientRiskGNN (GATv2 + Edge Features + Dual Readout)
 │   │   └── metrics.py              # AUROC, AUPRC, Brier Score, and calibration metrics
 │   ├── federated/
-│   │   ├── __init__.py
 │   │   ├── client.py               # flwr.client.NumPyClient with AMP and memory optimizations
-│   │   ├── strategy.py             # SMPC / Secure Aggregation strategy with zero-sum masking
-│   │   └── simulation.py           # Flower Simulation Engine multiplexing client nodes
+│   │   └── strategy.py             # SMPC / Secure Aggregation strategy with zero-sum masking
 │   ├── backend/
-│   │   ├── __init__.py
-│   │   ├── app.py                  # FastAPI server for orchestration & risk inference
-│   │   ├── schemas.py              # Pydantic data schemas
-│   │   └── state.py                # Thread-safe global training telemetry repository
+│   │   └── app.py                  # FastAPI server for orchestration & risk inference
 │   ├── frontend/
-│   │   ├── package.json            # React Vite dependencies
-│   │   ├── vite.config.js          # Vite configuration
-│   │   └── src/                    # React UI components, Patient DAG Canvas & Risk Gauge
+│   │   └── dashboard.py            # Streamlit interactive UI dashboard
 │   └── scripts/
-│       ├── __init__.py
-│       ├── generate_mock_data.py   # Script to generate 3-site FHIR datasets
-│       ├── run_simulation.py       # Standalone CLI federated simulation executor
+│       ├── run_server.py           # Starts the central Flower aggregator
+│       ├── run_client.py           # Starts a local hospital node for federated training
 │       ├── run_backend.py          # FastAPI launcher
-│       └── run_frontend.py         # React clinical dashboard launcher
+│       └── run_frontend.py         # Streamlit launcher
 ├── requirements.txt                # Full Python dependencies
+├── Dockerfile.backend              # Docker build config for backend and clients
+├── Dockerfile.frontend             # Docker build config for the Streamlit dashboard
+├── docker-compose.yml              # Multi-node simulation architecture configuration
 └── README.md                       # Platform documentation
 ```
 
@@ -65,7 +56,7 @@ FedRisk is an enterprise-grade, privacy-preserving ICU readmission prediction pl
 
 The platform ingests standard **FHIR R4 JSON** bundles representing longitudinal intensive care admissions:
 1. **`Patient`**: Demographics, age, biological sex.
-2. **`Condition`**: Discrete clinical diagnoses mapped to ICD-10 codes (e.g., Sepsis `A41.9`, ARDS `J80`, Septic Shock `R57.2`, AMI `I21.9`), onset timestamps, severity, and clinical status.
+2. **`Condition`**: Discrete clinical diagnoses mapped to ICD-10 codes (e.g., Sepsis `A41.9`, ARDS `J80`), onset timestamps, severity, and clinical status. Uses **PyHealth** for standard ontology mapping.
 3. **`Encounter`**: ICU admission intervals, length of stay, and 30-day readmission indicators.
 
 ---
@@ -92,43 +83,34 @@ $$\sum_{i=1}^3 \tilde{w}_i = \sum_{i=1}^3 w_i \quad \text{since} \quad \sum_{i=1
 
 ## Quickstart Guide
 
-### 1. Environment Verification
-```bash
-python -c "import torch; print('PyTorch Version:', torch.__version__, '| CUDA Available:', torch.cuda.is_available())"
-```
-
-### 2. Generate Synthetic FHIR Datasets
-Generate 300 synthetic patient records partitioned across 3 hospital sites:
-```bash
-python fedrisk/scripts/generate_mock_data.py
-```
-
-### 3. Run Federated Simulation (CLI)
-Execute a 5-round federated training run:
-```bash
-python fedrisk/scripts/run_simulation.py --rounds 5
-```
-
-### 4. Launch FastAPI Backend
-```bash
-python fedrisk/scripts/run_backend.py
-# Interactive API Docs: http://127.0.0.1:8000/docs
-```
-
-### 5. Launch React Clinical Dashboard
-In a separate terminal:
-```bash
-python fedrisk/scripts/run_frontend.py
-# Web Dashboard: http://localhost:8501
-```
-
-### 6. Docker Container Deployment (Multi-Node Containerization)
-Build and run all services in isolated Docker containers:
+### 1. Docker Container Deployment (Recommended)
+Build and run the entire multi-node architecture (Aggregator, 3 Clients, FastAPI, Streamlit) in isolated Docker containers:
 ```bash
 docker compose up --build
 ```
+- **Streamlit Clinical Dashboard**: http://localhost:8501
 - **Backend API & Orchestrator**: http://localhost:8000
-- **React Dashboard**: http://localhost:8501
+
+*(Note: Data is mounted to `./data`. Checkpoints are mounted to `./checkpoints`.)*
+
+### 2. Run Locally (Without Docker)
+
+**A. Generate Synthetic FHIR Datasets (Requires Java)**
+Generate 300 synthetic patient records partitioned across 3 hospital sites using Synthea:
+```bash
+python fedrisk/data/dataset_generator.py
+```
+
+**B. Launch FastAPI Backend**
+```bash
+python fedrisk/scripts/run_backend.py
+```
+
+**C. Launch Streamlit Clinical Dashboard**
+In a separate terminal:
+```bash
+python fedrisk/scripts/run_frontend.py
+```
 
 ---
 
@@ -136,7 +118,7 @@ docker compose up --build
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/orchestration/start` | Triggers federated simulation asynchronously across 3 nodes |
+| `POST` | `/api/orchestration/start` | Triggers federated simulation asynchronously across nodes |
 | `GET` | `/api/orchestration/status` | Returns active round, elapsed time, loss, and AUROC |
 | `GET` | `/api/orchestration/history` | Retrieves full round-by-round convergence time-series |
 | `POST` | `/api/predict/patient` | Evaluates readmission risk for a clinical trajectory or FHIR bundle |
