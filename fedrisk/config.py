@@ -32,7 +32,7 @@ HIDDEN_DIM = 64
 EDGE_FEATURE_DIM = 4
 GNN_HEADS = 4
 GNN_LAYERS = 2
-DROPOUT_RATE = 0.2
+DROPOUT_RATE = 0.35
 NUM_CLASSES = 1  # Binary prediction: ICU 30-Day Readmission
 
 # Federated Learning Settings
@@ -40,7 +40,7 @@ NUM_FEDERATED_ROUNDS = 5
 LOCAL_EPOCHS = 2
 BATCH_SIZE = 16
 LEARNING_RATE = 1e-3
-WEIGHT_DECAY = 1e-4
+WEIGHT_DECAY = 1e-3
 
 # Privacy & Security (SMPC / Secure Aggregation)
 SECURE_AGGREGATION_ENABLED = True

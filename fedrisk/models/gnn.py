@@ -92,7 +92,9 @@ class TemporalPatientRiskGNN(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.LayerNorm(hidden_dim // 2),
             nn.GELU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim // 2, out_dim),
         )
 

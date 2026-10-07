@@ -60,15 +60,29 @@ class HospitalDataPartitioner:
         num_total = len(graphs)
 
         # Deterministic stratified split by readmission label
-        torch.manual_seed(seed + site_id)
+        import random
+        rng = random.Random(seed + site_id)
         pos_graphs = [g for g in graphs if g.y.item() == 1.0]
         neg_graphs = [g for g in graphs if g.y.item() == 0.0]
+        rng.shuffle(pos_graphs)
+        rng.shuffle(neg_graphs)
 
-        n_val_pos = max(1, int(len(pos_graphs) * val_split))
-        n_val_neg = max(1, int(len(neg_graphs) * val_split))
+        # Allocate validation samples while guaranteeing training set has both classes
+        if len(pos_graphs) > 1:
+            n_val_pos = max(1, int(len(pos_graphs) * val_split))
+            n_val_pos = min(n_val_pos, len(pos_graphs) - 1)  # Guarantee >= 1 in train
+        else:
+            n_val_pos = 0  # Keep solitary positive in training set
+
+        if len(neg_graphs) > 1:
+            n_val_neg = max(1, int(len(neg_graphs) * val_split))
+            n_val_neg = min(n_val_neg, len(neg_graphs) - 1)  # Guarantee >= 1 in train
+        else:
+            n_val_neg = 0
 
         val_graphs = pos_graphs[:n_val_pos] + neg_graphs[:n_val_neg]
         train_graphs = pos_graphs[n_val_pos:] + neg_graphs[n_val_neg:]
+
 
         # Create PyG DataLoaders
         train_loader = DataLoader(

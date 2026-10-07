@@ -110,6 +110,37 @@ def start_orchestration(req: TrainingTriggerRequest):
     }
 
 
+@app.post("/api/orchestration/restart", response_model=Dict[str, str], tags=["Federated Orchestration"])
+def restart_orchestration(req: TrainingTriggerRequest):
+    """Force-resets and restarts a fresh federated learning simulation."""
+    training_state.reset_state()
+    training_state.start_training(total_rounds=req.num_rounds, force=True)
+
+    worker = threading.Thread(
+        target=_async_training_worker,
+        args=(req.num_rounds, req.local_epochs, req.learning_rate, req.use_smpc),
+        daemon=True,
+    )
+    training_state.worker_thread = worker
+    worker.start()
+
+    return {
+        "message": f"Federated simulation restarted successfully for {req.num_rounds} rounds.",
+        "status": "running",
+    }
+
+
+@app.post("/api/orchestration/reset", response_model=Dict[str, Any], tags=["Federated Orchestration"])
+def reset_orchestration():
+    """Resets the active simulation state back to idle."""
+    state = training_state.reset_state()
+    return {
+        "message": "Simulation state reset successfully to idle.",
+        "status": "idle",
+        "state": state,
+    }
+
+
 @app.get("/api/orchestration/status", response_model=TrainingStatusResponse, tags=["Federated Orchestration"])
 def get_orchestration_status():
     """Returns real-time progress, loss, and AUROC of the active simulation."""

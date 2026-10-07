@@ -43,7 +43,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
+backend_host = "127.0.0.1" if BACKEND_HOST in ["0.0.0.0", ""] else BACKEND_HOST
+BACKEND_URL = f"http://{backend_host}:{BACKEND_PORT}"
 
 
 def get_backend_health() -> Dict[str, Any]:
@@ -154,9 +155,15 @@ with tabs[0]:
     with ctrl_col4:
         smpc_toggle = st.toggle("SMPC Encryption", value=True)
 
-    btn_col1, btn_col2 = st.columns([1.5, 3])
+    curr_round = status_data.get("current_round", 0)
+    total_rounds = status_data.get("total_rounds", 0)
+    if total_rounds > 0 and curr_round >= total_rounds:
+        curr_status = "completed"
+
+    btn_col1, btn_col2, btn_col3 = st.columns([2, 1.5, 1.5])
     with btn_col1:
-        if st.button("🚀 Launch Federated Training Simulation", type="primary", use_container_width=True):
+        launch_disabled = (curr_status == "running")
+        if st.button("🚀 Launch Federated Training", type="primary", use_container_width=True, disabled=launch_disabled):
             try:
                 payload = {
                     "num_rounds": num_rounds_input,
@@ -177,6 +184,41 @@ with tabs[0]:
                     res = run_federated_simulation(num_rounds=num_rounds_input)
                     st.success(f"Simulation completed! Best AUROC: {res['best_auroc']:.4f}")
                     st.rerun()
+
+    with btn_col2:
+        restart_label = "⚡ Force Restart" if curr_status == "running" else "🔄 Restart Simulation"
+        if st.button(restart_label, use_container_width=True):
+            try:
+                payload = {
+                    "num_rounds": num_rounds_input,
+                    "local_epochs": local_epochs_input,
+                    "learning_rate": lr_input,
+                    "use_smpc": smpc_toggle,
+                }
+                resp = requests.post(f"{BACKEND_URL}/api/orchestration/restart", json=payload, timeout=5)
+                if resp.status_code == 200:
+                    st.success("Simulation restarted!")
+                    st.rerun()
+                else:
+                    st.warning(resp.json().get("detail", "Restart error"))
+            except Exception as e:
+                st.error(f"Error restarting: {e}")
+
+    with btn_col3:
+        if st.button("⏹️ Reset State", use_container_width=True):
+            try:
+                resp = requests.post(f"{BACKEND_URL}/api/orchestration/reset", timeout=5)
+                if resp.status_code == 200:
+                    st.info("Simulation state reset to idle.")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Error resetting: {e}")
+
+    if curr_status == "completed":
+        st.success(f"✅ Simulation Processed & Checkpoints Saved: All {total_rounds} federated rounds completed!")
+    elif curr_status == "running":
+        st.info(f"⏳ Simulation Active: Round {curr_round} of {total_rounds} in progress. If stuck or already finished, click Force Restart.")
+
 
     # Status Banner
     history_records = get_training_history()

@@ -20,6 +20,7 @@ class TrainingStatusResponse(BaseModel):
     elapsed_seconds: float
     latest_metrics: Dict[str, Any]
     smpc_active: bool
+    error_message: Optional[str] = None
 
 
 class SiteMetricItem(BaseModel):

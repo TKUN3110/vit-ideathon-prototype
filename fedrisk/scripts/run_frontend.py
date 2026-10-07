@@ -1,5 +1,5 @@
 """
-Launcher for FedRisk High-Performance React Clinical Intelligence Platform.
+Launcher for FedRisk Streamlit Clinical Intelligence Dashboard.
 Auto-detects project virtual environment (.venv) if available.
 """
 
@@ -15,22 +15,26 @@ venv_python = BASE_DIR / ".venv" / "Scripts" / "python.exe" if sys.platform == "
 if venv_python.exists() and Path(sys.executable).resolve() != venv_python.resolve():
     os.execv(str(venv_python), [str(venv_python)] + sys.argv)
 
-FRONTEND_DIR = BASE_DIR / "fedrisk" / "frontend"
+DASHBOARD_PATH = BASE_DIR / "fedrisk" / "frontend" / "dashboard.py"
 
 
 def main():
     print("=" * 70)
-    print("[FedRisk] Launching Modern React Clinical Frontend on http://localhost:8501...")
+    print("[FedRisk] Launching Streamlit Clinical Dashboard on http://localhost:8501...")
     print("=" * 70)
 
-    # Ensure node_modules are installed
-    if not (FRONTEND_DIR / "node_modules").exists():
-        print("[FedRisk] Installing frontend dependencies via npm...")
-        subprocess.run(["npm.cmd" if sys.platform == "win32" else "npm", "install"], cwd=str(FRONTEND_DIR), check=True)
-
-    cmd = ["npm.cmd" if sys.platform == "win32" else "npm", "run", "dev"]
-    subprocess.run(cmd, cwd=str(FRONTEND_DIR))
+    cmd = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        str(DASHBOARD_PATH),
+        "--server.port=8501",
+        "--server.address=0.0.0.0",
+    ]
+    subprocess.run(cmd, cwd=str(BASE_DIR))
 
 
 if __name__ == "__main__":
     main()
+
